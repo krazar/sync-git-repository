@@ -44,6 +44,25 @@ class GitRepoManager:
             self.logger.warning(f"Could not detect default branch, falling back to 'main': {str(e)}")
             return 'main'
     
+    def cleanup_sync_branches(self, repo: Repo):
+        """Clean up any sync-related branches"""
+        branches_to_remove = [
+            "sync_temp",
+            "sync_origin_github"  # Old branch name
+        ]
+        
+        for branch_name in branches_to_remove:
+            try:
+                if branch_name in repo.heads:
+                    self.logger.info(f"Removing old branch '{branch_name}'")
+                    # Ensure we're not on the branch we're trying to delete
+                    if repo.active_branch.name == branch_name:
+                        default_branch = self.get_default_branch(repo)
+                        repo.heads[default_branch].checkout()
+                    repo.delete_head(branch_name, force=True)
+            except Exception as e:
+                self.logger.warning(f"Could not delete branch '{branch_name}': {str(e)}")
+
     def sync_repository(self, repo_path: Path, source_remote: str, target_remote: str):
         """Sync repository from source remote to target remote using a temporary branch"""
         try:
@@ -53,16 +72,11 @@ class GitRepoManager:
             default_branch = self.get_default_branch(repo)
             self.logger.info(f"Detected default branch '{default_branch}' for {repo_path.name}")
             
+            # Clean up any old sync branches
+            self.cleanup_sync_branches(repo)
+            
             # Create a temporary branch name
             temp_branch = "sync_temp"
-            
-            # Clean up old temp branch if it exists
-            try:
-                if temp_branch in repo.heads:
-                    self.logger.info(f"Removing old temporary branch in {repo_path.name}")
-                    repo.delete_head(temp_branch, force=True)
-            except Exception as e:
-                self.logger.warning(f"Could not delete old temp branch: {str(e)}")
             
             # Fetch from source remote
             source = repo.remote(source_remote)
@@ -89,7 +103,7 @@ class GitRepoManager:
                 self.logger.info(f"Cleaned up temporary branch in {repo_path.name}")
             except Exception as e:
                 self.logger.warning(f"Could not clean up temp branch: {str(e)}")
-            
+                
         except Exception as e:
             self.logger.error(f"Error syncing repository {repo_path.name}: {str(e)}")
     
