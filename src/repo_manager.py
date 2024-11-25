@@ -45,7 +45,7 @@ class GitRepoManager:
             return 'main'
     
     def sync_repository(self, repo_path: Path, source_remote: str, target_remote: str):
-        """Sync repository from source remote to target remote"""
+        """Sync repository from source remote to target remote using a temporary branch"""
         try:
             repo = Repo(repo_path)
             
@@ -53,23 +53,42 @@ class GitRepoManager:
             default_branch = self.get_default_branch(repo)
             self.logger.info(f"Detected default branch '{default_branch}' for {repo_path.name}")
             
+            # Create a temporary branch name
+            temp_branch = "sync_temp"
+            
+            # Clean up old temp branch if it exists
+            try:
+                if temp_branch in repo.heads:
+                    self.logger.info(f"Removing old temporary branch in {repo_path.name}")
+                    repo.delete_head(temp_branch, force=True)
+            except Exception as e:
+                self.logger.warning(f"Could not delete old temp branch: {str(e)}")
+            
             # Fetch from source remote
             source = repo.remote(source_remote)
             self.logger.info(f"Fetching from {source_remote} for {repo_path.name}")
             source.fetch()
             
-            # Create and checkout new branch from default branch
-            new_branch = f"sync_{source_remote}_{target_remote}"
-            current = repo.create_head(new_branch, commit=f'{source_remote}/{default_branch}')
+            # Create and checkout new temporary branch from default branch
+            current = repo.create_head(temp_branch, commit=f'{source_remote}/{default_branch}')
             current.checkout()
             
             # Pull from source
-            source.pull(refspec=f'{default_branch}:{new_branch}')
+            source.pull(refspec=f'{default_branch}:{temp_branch}')
             
             # Push to target
             target = repo.remote(target_remote)
             self.logger.info(f"Pushing to {target_remote} for {repo_path.name}")
-            target.push(new_branch)
+            target.push(temp_branch)
+            
+            # Clean up: checkout default branch and delete temporary branch
+            try:
+                default = repo.heads[default_branch]
+                default.checkout()
+                repo.delete_head(temp_branch, force=True)
+                self.logger.info(f"Cleaned up temporary branch in {repo_path.name}")
+            except Exception as e:
+                self.logger.warning(f"Could not clean up temp branch: {str(e)}")
             
         except Exception as e:
             self.logger.error(f"Error syncing repository {repo_path.name}: {str(e)}")
